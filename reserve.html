@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>ご予約</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  :root {
+    --line-green: #06C755;
+    --text-main: #1a1a1a;
+    --text-sub: #767676;
+    --border: #e5e5e5;
+    --bg: #f7f7f7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text-main);
+  }
+  header {
+    background: var(--line-green);
+    color: #fff;
+    padding: 14px 16px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  main { padding: 16px; max-width: 480px; margin: 0 auto; }
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+  .month-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .month-nav button {
+    border: none;
+    background: none;
+    font-size: 18px;
+    color: var(--text-sub);
+    padding: 4px 10px;
+  }
+  .calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    text-align: center;
+  }
+  .weekday { font-size: 11px; color: var(--text-sub); padding-bottom: 4px; }
+  .day-cell {
+    padding: 8px 0;
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .day-cell.available { background: #e6f9ee; color: #06883f; font-weight: 600; }
+  .day-cell.consult { background: #fff3e0; color: #b96a00; font-weight: 600; }
+  .day-cell.selected { outline: 2px solid var(--line-green); }
+  .legend { display: flex; gap: 14px; margin-top: 10px; font-size: 11px; color: var(--text-sub); }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  .dot.available { background: #06883f; }
+  .dot.consult { background: #b96a00; }
+
+  .time-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  .time-btn {
+    text-align: left;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    font-size: 14px;
+  }
+  .time-btn.selected { border-color: var(--line-green); background: #e6f9ee; }
+
+  label { font-size: 13px; color: var(--text-sub); display: block; margin-bottom: 6px; }
+  textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+  }
+  .profile-row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: #e6f9ee; color: #06883f;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 600;
+  }
+  .profile-name { font-size: 13px; font-weight: 600; }
+  .profile-hint { font-size: 11px; color: var(--text-sub); }
+
+  .submit-btn {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--line-green);
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    margin-top: 6px;
+  }
+  .submit-btn:disabled { background: #ccc; }
+  .note { font-size: 11px; color: var(--text-sub); text-align: center; margin-top: 8px; }
+  .status-msg { text-align: center; padding: 40px 16px; font-size: 14px; color: var(--text-sub); }
+</style>
+</head>
+<body>
+
+<header>ご予約</header>
+<main id="app">
+  <div class="status-msg" id="loading">読み込んでいます…</div>
+</main>
+
+<script>
+// ==== 設定 ====
+const LIFF_ID = 'ここにLIFF IDを入力';
+const API_URL = 'ここにGASのWebアプリURLを入力';
+
+let liffProfile = null;
+let currentYear, currentMonth;
+let slotsByDate = {};
+let selectedDate = null;
+let selectedTime = null;
+
+async function init() {
+  await liff.init({ liffId: LIFF_ID });
+  if (!liff.isLoggedIn()) {
+    liff.login();
+    return;
+  }
+  liffProfile = await liff.getProfile();
+
+  const now = new Date();
+  currentYear = now.getFullYear();
+  currentMonth = now.getMonth() + 1;
+
+  await loadMonth();
+  renderCalendarView();
+}
+
+async function loadMonth() {
+  const res = await fetch(API_URL + '?action=listSlots&year=' + currentYear + '&month=' + currentMonth);
+  const json = await res.json();
+  slotsByDate = json.ok ? json.slots : {};
+}
+
+function pad(n) { return String(n).padStart(2, '0'); }
+
+function renderCalendarView() {
+  selectedDate = null;
+  selectedTime = null;
+
+  const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+  const firstWeekday = new Date(currentYear, currentMonth - 1, 1).getDay();
+
+  let cells = '';
+  for (let i = 0; i < firstWeekday; i++) cells += '<div></div>';
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = currentYear + '-' + pad(currentMonth) + '-' + pad(d);
+    const info = slotsByDate[dateStr];
+    let cls = 'day-cell';
+    if (info && info.status === '空き' && info.times.length > 0) cls += ' available';
+    else if (info && info.status === '要相談') cls += ' consult';
+    cells += '<div class="' + cls + '" data-date="' + dateStr + '"' +
+      (info ? ' onclick="selectDate(\'' + dateStr + '\')"' : '') + '>' + d + '</div>';
+  }
+
+  document.getElementById('app').innerHTML =
+    '<div class="card">' +
+      '<div class="month-nav">' +
+        '<button onclick="changeMonth(-1)">&lt;</button>' +
+        '<span>' + currentYear + '年' + currentMonth + '月</span>' +
+        '<button onclick="changeMonth(1)">&gt;</button>' +
+      '</div>' +
+      '<div class="calendar-grid">' +
+        '<div class="weekday">日</div><div class="weekday">月</div><div class="weekday">火</div>' +
+        '<div class="weekday">水</div><div class="weekday">木</div><div class="weekday">金</div><div class="weekday">土</div>' +
+        cells +
+      '</div>' +
+      '<div class="legend">' +
+        '<span><span class="dot available"></span>空きあり</span>' +
+        '<span><span class="dot consult"></span>要相談</span>' +
+      '</div>' +
+    '</div>' +
+    '<div class="card" id="timeCard" style="display:none;"></div>';
+}
+
+async function changeMonth(diff) {
+  currentMonth += diff;
+  if (currentMonth < 1) { currentMonth = 12; currentYear--; }
+  if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+  await loadMonth();
+  renderCalendarView();
+}
+
+function selectDate(dateStr) {
+  selectedDate = dateStr;
+  selectedTime = null;
+  document.querySelectorAll('.day-cell').forEach(el => el.classList.remove('selected'));
+  document.querySelector('.day-cell[data-date="' + dateStr + '"]').classList.add('selected');
+
+  const info = slotsByDate[dateStr];
+  const timeCard = document.getElementById('timeCard');
+  timeCard.style.display = 'block';
+
+  if (info.status === '要相談') {
+    timeCard.innerHTML =
+      '<p style="font-size:13px; color:var(--text-sub); margin:0 0 12px;">この日は会場確保の都合により、確定まで少々お時間をいただく場合があります。</p>' +
+      renderSymptomForm();
+  } else {
+    const buttons = info.times.map(t =>
+      '<button class="time-btn" data-time="' + t + '" onclick="selectTime(\'' + t + '\')">' + t + '</button>'
+    ).join('');
+    timeCard.innerHTML =
+      '<label>' + dateStr + ' の空き時間</label>' +
+      '<div class="time-list" id="timeList">' + buttons + '</div>' +
+      '<div id="formArea"></div>';
+  }
+}
+
+function selectTime(time) {
+  selectedTime = time;
+  document.querySelectorAll('.time-btn').forEach(el => el.classList.remove('selected'));
+  document.querySelector('.time-btn[data-time="' + time + '"]').classList.add('selected');
+  document.getElementById('formArea').innerHTML = renderSymptomForm();
+}
+
+function renderSymptomForm() {
+  return (
+    '<div class="profile-row">' +
+      '<div class="avatar">' + (liffProfile.displayName || '').slice(0,1) + '</div>' +
+      '<div>' +
+        '<div class="profile-name">' + liffProfile.displayName + '</div>' +
+        '<div class="profile-hint">LINEプロフィールより取得</div>' +
+      '</div>' +
+    '</div>' +
+    '<label>症状・ご相談内容</label>' +
+    '<textarea id="symptom" rows="4" placeholder="例:肩こりがひどく、デスクワーク中心の生活です"></textarea>' +
+    '<button class="submit-btn" onclick="submitReservation()">この内容で予約する</button>' +
+    '<p class="note">確定次第LINEでご連絡します</p>'
+  );
+}
+
+async function submitReservation() {
+  const symptom = document.getElementById('symptom').value.trim();
+  if (!symptom) {
+    alert('症状・ご相談内容を入力してください');
+    return;
+  }
+
+  const btn = document.querySelector('.submit-btn');
+  btn.disabled = true;
+  btn.textContent = '送信中…';
+
+  const idToken = liff.getIDToken();
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    body: JSON.stringify({
+      action: 'reserve',
+      idToken: idToken,
+      date: selectedDate,
+      time: selectedTime || null,
+      symptom: symptom
+    })
+  });
+  const json = await res.json();
+
+  if (json.ok) {
+    document.getElementById('app').innerHTML =
+      '<div class="status-msg">予約を受け付けました。<br>確定次第LINEでご連絡します。</div>';
+  } else {
+    alert('予約できませんでした(' + json.error + ')。お手数ですが最初からやり直してください。');
+    renderCalendarView();
+  }
+}
+
+init();
+</script>
+</body>
+</html>
