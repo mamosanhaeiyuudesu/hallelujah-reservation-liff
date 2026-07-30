@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>枠設定</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  :root {
+    --line-green: #06C755;
+    --text-main: #1a1a1a;
+    --text-sub: #767676;
+    --border: #e5e5e5;
+    --bg: #f7f7f7;
+    --amber: #b96a00;
+    --amber-bg: #fff3e0;
+    --red: #c00;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text-main);
+  }
+  header {
+    background: var(--line-green);
+    color: #fff;
+    padding: 14px 16px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  main { padding: 16px; max-width: 480px; margin: 0 auto; }
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+  .month-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .month-nav button {
+    border: none;
+    background: none;
+    font-size: 18px;
+    color: var(--text-sub);
+    padding: 4px 10px;
+  }
+  .calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    text-align: center;
+  }
+  .weekday { font-size: 11px; color: var(--text-sub); padding-bottom: 4px; }
+  .day-cell { padding: 8px 0; border-radius: 8px; font-size: 13px; position: relative; }
+  .day-cell.open { background: #e6f9ee; color: #06883f; font-weight: 600; }
+  .day-cell.consult { background: var(--amber-bg); color: var(--amber); font-weight: 600; }
+  .day-cell.booked-dot::after {
+    content: ''; position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%);
+    width: 4px; height: 4px; border-radius: 50%; background: var(--red);
+  }
+  .legend { display: flex; gap: 12px; margin-top: 10px; font-size: 11px; color: var(--text-sub); flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  .dot.open { background: #06883f; }
+  .dot.consult { background: var(--amber); }
+  .dot.booked { background: var(--red); border-radius: 50%; width: 6px; height: 6px; }
+
+  .bulk-btn {
+    width: 100%; padding: 10px; margin-top: 12px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: #fff; font-size: 13px; color: var(--text-main); font-weight: 600;
+  }
+
+  label { font-size: 12px; color: var(--text-sub); display: block; margin: 10px 0 4px; }
+  input[type="text"], input[type="number"], input[type="time"], select {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 8px; font-size: 14px; font-family: inherit;
+  }
+  .status-radio { display: flex; gap: 8px; margin-top: 6px; }
+  .status-radio label {
+    flex: 1; text-align: center; padding: 8px 0; border: 1px solid var(--border);
+    border-radius: 8px; font-size: 12px; color: var(--text-main); margin: 0; cursor: pointer;
+  }
+  .status-radio input { display: none; }
+  .status-radio input:checked + span { font-weight: 700; }
+  .status-radio label.active { border-color: var(--line-green); background: #e6f9ee; }
+
+  .row2 { display: flex; gap: 8px; }
+  .row2 > div { flex: 1; }
+
+  .btn { width: 100%; padding: 12px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; margin-top: 14px; }
+  .btn-primary { background: var(--line-green); color: #fff; }
+  .btn-warn { background: var(--red); color: #fff; }
+  .btn-secondary { background: #fff; color: var(--text-sub); border: 1px solid var(--border); }
+  .status-msg { text-align: center; padding: 40px 16px; font-size: 14px; color: var(--text-sub); }
+  .warn-note { font-size: 12px; color: var(--red); margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<header>枠設定(管理者用)</header>
+<main id="app">
+  <div class="status-msg" id="loading">読み込んでいます…</div>
+</main>
+
+<script>
+// ==== 設定 ====
+const LIFF_ID = 'ここに管理画面用confirm画面のLIFF IDを入力';
+const API_URL = 'https://script.google.com/macros/s/AKfycbymXtgcnyMPrj1VFAvcNbmgg_9zU0sg_WL8sAma2WlCK5gRZ07-gt95f7nJUn0vNi_4/exec';
+
+let currentYear, currentMonth;
+let daysData = {};
+let selectedDate = null;
+
+async function init() {
+  await liff.init({ liffId: LIFF_ID });
+  if (!liff.isLoggedIn()) {
+    liff.login();
+    return;
+  }
+
+  const now = new Date();
+  currentYear = now.getFullYear();
+  currentMonth = now.getMonth() + 1;
+
+  await loadMonth();
+  renderCalendarView();
+}
+
+function pad(n) { return String(n).padStart(2, '0'); }
+
+async function loadMonth() {
+  const idToken = liff.getIDToken();
+  const res = await fetch(API_URL + '?action=listSlotsAdmin&year=' + currentYear + '&month=' + currentMonth + '&idToken=' + encodeURIComponent(idToken));
+  const json = await res.json();
+  if (!json.ok) {
+    document.getElementById('app').innerHTML = '<div class="status-msg">読み込みに失敗しました(' + json.error + ')</div>';
+    throw new Error(json.error);
+  }
+  daysData = json.days;
+}
+
+function dayStatusClass(info) {
+  if (!info) return '';
+  if (info.status === '要相談') return 'consult';
+  if (info.slots && info.slots.length > 0) return 'open';
+  return '';
+}
+
+function hasBooked(info) {
+  return info && info.slots && info.slots.some(s => s.status === '埋まり');
+}
+
+function renderCalendarView() {
+  selectedDate = null;
+  const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+  const firstWeekday = new Date(currentYear, currentMonth - 1, 1).getDay();
+
+  let cells = '';
+  for (let i = 0; i < firstWeekday; i++) cells += '<div></div>';
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = currentYear + '-' + pad(currentMonth) + '-' + pad(d);
+    const info = daysData[dateStr];
+    let cls = 'day-cell ' + dayStatusClass(info);
+    if (hasBooked(info)) cls += ' booked-dot';
+    cells += '<div class="' + cls + '" onclick="openDayEditor(\'' + dateStr + '\')">' + d + '</div>';
+  }
+
+  document.getElementById('app').innerHTML =
+    '<div class="card">' +
+      '<div class="month-nav">' +
+        '<button onclick="changeMonth(-1)">&lt;</button>' +
+        '<span>' + currentYear + '年' + currentMonth + '月</span>' +
+        '<button onclick="changeMonth(1)">&gt;</button>' +
+      '</div>' +
+      '<div class="calendar-grid">' +
+        '<div class="weekday">日</div><div class="weekday">月</div><div class="weekday">火</div>' +
+        '<div class="weekday">水</div><div class="weekday">木</div><div class="weekday">金</div><div class="weekday">土</div>' +
+        cells +
+      '</div>' +
+      '<div class="legend">' +
+        '<span><span class="dot open"></span>開放</span>' +
+        '<span><span class="dot consult"></span>要相談</span>' +
+        '<span><span class="dot booked"></span>予約あり</span>' +
+      '</div>' +
+      '<button class="bulk-btn" onclick="openBulkEditor()">この月の月・木に一括反映</button>' +
+    '</div>' +
+    '<div id="editorArea"></div>';
+}
+
+async function changeMonth(diff) {
+  currentMonth += diff;
+  if (currentMonth < 1) { currentMonth = 12; currentYear--; }
+  if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+  await loadMonth();
+  renderCalendarView();
+}
+
+function openDayEditor(dateStr) {
+  selectedDate = dateStr;
+  const info = daysData[dateStr];
+  const currentStatus = info ? (info.status === '要相談' ? '要相談' : (info.slots && info.slots.length > 0 ? '開放' : '非開放')) : '非開放';
+  const booked = hasBooked(info);
+
+  document.getElementById('editorArea').innerHTML =
+    '<div class="card">' +
+      '<div style="font-size:14px; font-weight:600; margin-bottom:8px;">' + dateStr + ' の設定</div>' +
+      (booked ? '<div class="warn-note">この日には予約済みの枠があります。「開放」以外に変更しようとすると保存できません。</div>' : '') +
+      '<div class="status-radio" id="statusRadio">' +
+        radioOption('非開放', currentStatus) +
+        radioOption('開放', currentStatus) +
+        radioOption('要相談', currentStatus) +
+      '</div>' +
+      '<div id="openFields" style="display:' + (currentStatus === '開放' ? 'block' : 'none') + ';">' +
+        '<div class="row2">' +
+          '<div><label>開始時刻</label><input type="time" id="startTime" value="10:00"></div>' +
+          '<div><label>枠数</label><input type="number" id="slotCount" value="5" min="1" max="20"></div>' +
+        '</div>' +
+        '<div class="row2">' +
+          '<div><label>1枠の長さ(分)</label><input type="number" id="slotDuration" value="60" min="10" step="10"></div>' +
+          '<div><label>会場</label><input type="text" id="venue" value="わっか"></div>' +
+        '</div>' +
+      '</div>' +
+      '<button class="btn btn-primary" onclick="saveDay()">保存</button>' +
+      '<button class="btn btn-secondary" onclick="document.getElementById(\'editorArea\').innerHTML=\'\'">閉じる</button>' +
+    '</div>';
+
+  document.querySelectorAll('input[name="dayStatus"]').forEach(el => {
+    el.addEventListener('change', () => {
+      document.getElementById('openFields').style.display = el.value === '開放' ? 'block' : 'none';
+    });
+  });
+}
+
+function radioOption(value, current) {
+  const checked = value === current ? 'checked' : '';
+  return '<label class="' + (value === current ? 'active' : '') + '">' +
+    '<input type="radio" name="dayStatus" value="' + value + '" ' + checked + '>' +
+    '<span>' + value + '</span></label>';
+}
+
+async function saveDay() {
+  const status = document.querySelector('input[name="dayStatus"]:checked').value;
+  const payload = {
+    action: 'setDayStatus',
+    idToken: liff.getIDToken(),
+    date: selectedDate,
+    status: status
+  };
+  if (status === '開放') {
+    payload.startTime = document.getElementById('startTime').value;
+    payload.slotCount = Number(document.getElementById('slotCount').value);
+    payload.slotDurationMin = Number(document.getElementById('slotDuration').value);
+    payload.venue = document.getElementById('venue').value;
+  }
+
+  const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) });
+  const json = await res.json();
+
+  if (json.ok) {
+    await loadMonth();
+    renderCalendarView();
+  } else if (json.error === 'booked_slots_exist') {
+    alert('予約済みの枠(' + json.bookedTimes.join(', ') + ')が含まれているため、この変更はできません。');
+  } else {
+    alert('保存できませんでした(' + json.error + ')');
+  }
+}
+
+function openBulkEditor() {
+  document.getElementById('editorArea').innerHTML =
+    '<div class="card">' +
+      '<div style="font-size:14px; font-weight:600; margin-bottom:8px;">' + currentYear + '年' + currentMonth + '月の月・木に一括反映</div>' +
+      '<div style="font-size:12px; color:var(--text-sub); margin-bottom:8px;">すでに個別設定済みの日はスキップされます(上書きしません)</div>' +
+      '<div class="row2">' +
+        '<div><label>開始時刻</label><input type="time" id="bulkStartTime" value="10:00"></div>' +
+        '<div><label>枠数</label><input type="number" id="bulkSlotCount" value="5" min="1" max="20"></div>' +
+      '</div>' +
+      '<div class="row2">' +
+        '<div><label>1枠の長さ(分)</label><input type="number" id="bulkSlotDuration" value="60" min="10" step="10"></div>' +
+        '<div><label>会場</label><input type="text" id="bulkVenue" value="わっか"></div>' +
+      '</div>' +
+      '<button class="btn btn-primary" onclick="saveBulk()">この内容で一括反映</button>' +
+      '<button class="btn btn-secondary" onclick="document.getElementById(\'editorArea\').innerHTML=\'\'">閉じる</button>' +
+    '</div>';
+}
+
+async function saveBulk() {
+  const payload = {
+    action: 'bulkApplyWeekday',
+    idToken: liff.getIDToken(),
+    year: currentYear,
+    month: currentMonth,
+    weekdays: [1, 4],
+    startTime: document.getElementById('bulkStartTime').value,
+    slotCount: Number(document.getElementById('bulkSlotCount').value),
+    slotDurationMin: Number(document.getElementById('bulkSlotDuration').value),
+    venue: document.getElementById('bulkVenue').value
+  };
+
+  const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) });
+  const json = await res.json();
+
+  if (json.ok) {
+    alert('反映しました(' + json.appliedDates.length + '日)。既に設定済みでスキップした日:' + (json.skippedDates.length || 0) + '日');
+    await loadMonth();
+    renderCalendarView();
+  } else {
+    alert('反映できませんでした(' + json.error + ')');
+  }
+}
+
+init();
+</script>
+</body>
+</html>
