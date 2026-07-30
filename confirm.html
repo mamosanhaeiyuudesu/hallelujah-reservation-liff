@@ -100,7 +100,8 @@ async function init() {
     return;
   }
 
-  const res = await fetch(API_URL + '?action=getReservation&reservationId=' + encodeURIComponent(reservationId));
+  const idToken = liff.getIDToken();
+  const res = await fetch(API_URL + '?action=getReservation&reservationId=' + encodeURIComponent(reservationId) + '&idToken=' + encodeURIComponent(idToken));
   const json = await res.json();
 
   if (!json.ok) {
