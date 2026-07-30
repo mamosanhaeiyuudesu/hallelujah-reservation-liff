@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>予約確認・送信</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  :root {
+    --line-green: #06C755;
+    --text-main: #1a1a1a;
+    --text-sub: #767676;
+    --border: #e5e5e5;
+    --bg: #f7f7f7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text-main);
+  }
+  header {
+    background: var(--line-green);
+    color: #fff;
+    padding: 14px 16px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  main { padding: 16px; max-width: 480px; margin: 0 auto; }
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+  .info-box {
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .info-box .name { font-weight: 600; }
+  .info-box .symptom { color: var(--text-sub); margin-top: 4px; white-space: pre-wrap; }
+  label { font-size: 13px; color: var(--text-sub); display: block; margin-bottom: 6px; }
+  textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.6;
+    font-family: inherit;
+    resize: vertical;
+  }
+  .btn-row { display: flex; gap: 8px; margin-top: 14px; }
+  .btn {
+    flex: 1;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .btn-primary { background: var(--line-green); color: #fff; }
+  .btn-secondary { background: #fff; color: var(--text-sub); border: 1px solid var(--border); }
+  .btn:disabled { opacity: 0.5; }
+  .status-msg { text-align: center; padding: 40px 16px; font-size: 14px; color: var(--text-sub); }
+</style>
+</head>
+<body>
+
+<header>予約確認・送信</header>
+<main id="app">
+  <div class="status-msg" id="loading">読み込んでいます…</div>
+</main>
+
+<script>
+// ==== 設定 ====
+const LIFF_ID = 'ここに管理者用confirm画面のLIFF IDを入力';
+const API_URL = 'ここにGASのWebアプリURLを入力';
+
+let reservationId = null;
+let reservationData = null;
+
+async function init() {
+  await liff.init({ liffId: LIFF_ID });
+  if (!liff.isLoggedIn()) {
+    liff.login();
+    return;
+  }
+
+  const params = new URLSearchParams(location.search);
+  reservationId = params.get('reservationId');
+  if (!reservationId) {
+    document.getElementById('app').innerHTML = '<div class="status-msg">予約IDが指定されていません。</div>';
+    return;
+  }
+
+  const res = await fetch(API_URL + '?action=getReservation&reservationId=' + encodeURIComponent(reservationId));
+  const json = await res.json();
+
+  if (!json.ok) {
+    document.getElementById('app').innerHTML = '<div class="status-msg">予約情報を取得できませんでした(' + json.error + ')</div>';
+    return;
+  }
+
+  reservationData = json.reservation;
+  render(json.template);
+}
+
+function render(template) {
+  const r = reservationData;
+  const statusNote =
+    r.status === '確定' ? '<p style="color:#06883f; font-size:13px; margin:0 0 12px;">※この予約はすでに確定済みです</p>' :
+    r.status === 'キャンセル' ? '<p style="color:#c00; font-size:13px; margin:0 0 12px;">※この予約はすでに見送り済みです</p>' : '';
+
+  document.getElementById('app').innerHTML =
+    '<div class="card">' +
+      statusNote +
+      '<div class="info-box">' +
+        '<div class="name">' + r.displayName + ' 様</div>' +
+        '<div>' + r.date + ' ' + r.time + '〜</div>' +
+        '<div class="symptom">' + r.symptom + '</div>' +
+      '</div>' +
+      '<label>送信メッセージ(編集可)</label>' +
+      '<textarea id="message" rows="10">' + template + '</textarea>' +
+      '<div class="btn-row">' +
+        '<button class="btn btn-primary" id="sendBtn" onclick="send()"' + (r.status !== '仮受付' ? ' disabled' : '') + '>送信</button>' +
+        '<button class="btn btn-secondary" id="cancelBtn" onclick="cancelReservation()"' + (r.status !== '仮受付' ? ' disabled' : '') + '>見送る</button>' +
+      '</div>' +
+    '</div>';
+}
+
+async function send() {
+  const message = document.getElementById('message').value.trim();
+  if (!message) {
+    alert('メッセージを入力してください');
+    return;
+  }
+
+  setButtonsBusy('送信中…');
+
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'confirm', reservationId: reservationId, message: message, idToken: liff.getIDToken() })
+  });
+  const json = await res.json();
+
+  if (json.ok) {
+    document.getElementById('app').innerHTML = '<div class="status-msg">送信しました。</div>';
+  } else {
+    alert('送信できませんでした(' + json.error + ')');
+    location.reload();
+  }
+}
+
+async function cancelReservation() {
+  if (!confirm('この予約を見送りにしますか?お客様には送信されません。')) return;
+
+  setButtonsBusy('処理中…');
+
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'cancel', reservationId: reservationId, idToken: liff.getIDToken() })
+  });
+  const json = await res.json();
+
+  if (json.ok) {
+    document.getElementById('app').innerHTML = '<div class="status-msg">見送りにしました。枠は再度予約可能になりました。</div>';
+  } else {
+    alert('処理できませんでした(' + json.error + ')');
+    location.reload();
+  }
+}
+
+function setButtonsBusy(label) {
+  document.getElementById('sendBtn').disabled = true;
+  document.getElementById('cancelBtn').disabled = true;
+  document.getElementById('sendBtn').textContent = label;
+}
+
+init();
+</script>
+</body>
+</html>
